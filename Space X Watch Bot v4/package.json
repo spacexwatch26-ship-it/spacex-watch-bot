@@ -1,0 +1,15 @@
+{
+  "name": "spacex-watch-bot",
+  "version": "4.0.0",
+  "private": true,
+  "description": "Space X Watch operations, moderation, tickets, polls, and private staff tools",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "check": "node --check bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.4.7"
+  }
+}
