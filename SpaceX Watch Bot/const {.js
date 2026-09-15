@@ -12,6 +12,7 @@ const {
     GatewayIntentBits,
     ModalBuilder,
     PermissionsBitField,
+    StringSelectMenuBuilder,
     TextInputBuilder,
     TextInputStyle
 } = require('discord.js');
@@ -22,6 +23,7 @@ const DATA_FILE = path.join(__dirname, 'punishments.json');
 const BRAND = 'SpaceX Watch';
 const COLORS = { blue: 0x2563eb, green: 0x16a34a, amber: 0xd97706 };
 const polls = new Map();
+const pendingModeration = new Map();
 
 const client = new Client({
     intents: [
@@ -276,7 +278,7 @@ client.on('messageCreate', async message => {
                 return message.reply(permissionMessage('Moderate Members'));
             }
             const button = new ButtonBuilder()
-                .setCustomId(`moderate:${message.author.id}`)
+                .setCustomId(`moderate:${message.guildId}:${message.author.id}`)
                 .setLabel('Open moderation form')
                 .setStyle(ButtonStyle.Primary);
             const embed = brandedEmbed('Moderation desk', 'Record a warning, advisory, timeout, kick, or ban with one guided form.', COLORS.amber)
@@ -284,7 +286,12 @@ client.on('messageCreate', async message => {
                     { name: 'Required', value: 'Target, action, reason, and expiration' },
                     { name: 'Expiration examples', value: '`Never` • `30 minutes` • `7 days` • `09/30/2026`' }
                 );
-            await message.channel.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] });
+            try {
+                await message.author.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] });
+            } catch {
+                return message.reply('I could not DM you the private moderation panel. Please enable DMs from server members.');
+            }
+            await message.reply('I sent the private moderation panel to your DMs.');
             return message.delete().catch(() => undefined);
         }
 
@@ -381,6 +388,84 @@ client.on('interactionCreate', async interaction => {
             return setTimeout(() => interaction.channel.delete().catch(() => undefined), 5000);
         }
 
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith('moderation-action:')) {
+            const pending = pendingModeration.get(interaction.user.id);
+            const moderationGuild = pending ? await client.guilds.fetch(pending.guildId).catch(() => null) : null;
+            const moderationMember = moderationGuild ? await moderationGuild.members.fetch(interaction.user.id).catch(() => null) : null;
+            if (interaction.customId !== `moderation-action:${interaction.user.id}` || !isStaff(moderationMember)) {
+                return interaction.reply({ content: 'This moderation menu is restricted to the staff member who opened it.', ephemeral: true });
+            }
+            if (!pending) return interaction.reply({ content: 'This moderation form expired. Run `-moderate` again.', ephemeral: true });
+            pending.action = interaction.values[0];
+            return interaction.deferUpdate();
+        }
+
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith('moderation-duration:')) {
+            const pending = pendingModeration.get(interaction.user.id);
+            const moderationGuild = pending ? await client.guilds.fetch(pending.guildId).catch(() => null) : null;
+            const moderationMember = moderationGuild ? await moderationGuild.members.fetch(interaction.user.id).catch(() => null) : null;
+            if (interaction.customId !== `moderation-duration:${interaction.user.id}` || !isStaff(moderationMember)) {
+                return interaction.reply({ content: 'This moderation menu is restricted to the staff member who opened it.', ephemeral: true });
+            }
+            if (!pending) return interaction.reply({ content: 'This moderation form expired. Run `-moderate` again.', ephemeral: true });
+            pending.duration = interaction.values[0];
+            return interaction.deferUpdate();
+        }
+
+        if (interaction.isButton() && interaction.customId.startsWith('moderation-confirm:')) {
+            const pending = pendingModeration.get(interaction.user.id);
+            const moderationGuild = pending ? await client.guilds.fetch(pending.guildId).catch(() => null) : null;
+            const moderationMember = moderationGuild ? await moderationGuild.members.fetch(interaction.user.id).catch(() => null) : null;
+            if (interaction.customId !== `moderation-confirm:${interaction.user.id}` || !isStaff(moderationMember)) {
+                return interaction.reply({ content: 'This moderation form is restricted to staff.', ephemeral: true });
+            }
+            if (!pending?.action || !pending.duration) {
+                return interaction.reply({ content: 'Choose both an action and a duration first.', ephemeral: true });
+            }
+
+            const member = await findMember(moderationGuild, pending.targetId);
+            if (!member) {
+                pendingModeration.delete(interaction.user.id);
+                return interaction.reply({ content: 'That member is no longer available.', ephemeral: true });
+            }
+
+            const durationMs = { '30m': 1800000, '1h': 3600000, '6h': 21600000, '1d': 86400000, '7d': 604800000, '14d': 1209600000, '28d': 2419200000 }[pending.duration];
+            const expiration = pending.duration === 'never' ? null : new Date(Date.now() + durationMs);
+            try {
+                if (pending.action === 'timeout') {
+                    if (!expiration) return interaction.reply({ content: 'A mute/timeout requires a duration. Choose a duration other than Permanent / never.', ephemeral: true });
+                    await member.timeout(durationMs, pending.reason);
+                } else if (pending.action === 'kick') {
+                    await member.kick(pending.reason);
+                } else if (pending.action === 'ban') {
+                    await member.ban({ reason: pending.reason });
+                }
+            } catch (error) {
+                console.error('[moderation]', error);
+                return interaction.reply({ content: 'I could not complete that action. Check my permissions and role position.', ephemeral: true });
+            }
+
+            const store = loadStore();
+            const record = {
+                id: store.nextId++, guildId: pending.guildId, targetId: member.id,
+                targetTag: member.user.tag, issuerId: interaction.user.id, issuerTag: interaction.user.tag,
+                type: pending.action, reason: pending.reason, issuedAt: new Date().toISOString(),
+                expiration: expiration ? expiration.toISOString() : null, status: statusFor(expiration)
+            };
+            store.punishments.push(record);
+            saveStore(store);
+            pendingModeration.delete(interaction.user.id);
+            return interaction.update({
+                embeds: [brandedEmbed('Action recorded', `Successfully recorded a **${pending.action}** for <@${member.id}>.`, COLORS.green)
+                    .addFields(
+                        { name: 'Reason', value: pending.reason },
+                        { name: 'Duration', value: pending.duration === 'never' ? 'Permanent / never' : discordDate(record.expiration) },
+                        { name: 'Record', value: `#${String(record.id).padStart(4, '0')}` }
+                    )],
+                components: []
+            });
+        }
+
         if (interaction.isButton() && interaction.customId.startsWith('poll:')) {
             const [, pollId, optionIndex] = interaction.customId.split(':');
             const poll = polls.get(pollId);
@@ -400,81 +485,95 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (interaction.isButton() && interaction.customId.startsWith('moderate:')) {
-            if (interaction.customId !== `moderate:${interaction.user.id}`) {
+            const [, guildId, staffId] = interaction.customId.split(':');
+            const moderationGuild = await client.guilds.fetch(guildId).catch(() => null);
+            const moderationMember = moderationGuild ? await moderationGuild.members.fetch(interaction.user.id).catch(() => null) : null;
+            if (staffId !== interaction.user.id || !moderationGuild || !moderationMember) {
                 return interaction.reply({ content: 'Only the staff member who opened this form can use it.', ephemeral: true });
             }
-            if (!isStaff(interaction.member)) {
+            if (!isStaff(moderationMember)) {
                 return interaction.reply({ content: 'This moderation form is restricted to staff.', ephemeral: true });
             }
-            if (!hasPermission(interaction.member, PermissionsBitField.Flags.ModerateMembers)) {
+            if (!hasPermission(moderationMember, PermissionsBitField.Flags.ModerateMembers)) {
                 return interaction.reply({ content: permissionMessage('Moderate Members'), ephemeral: true });
             }
-            const modal = new ModalBuilder().setCustomId(`moderation:${interaction.user.id}`).setTitle(`${BRAND} moderation`);
+            const modal = new ModalBuilder().setCustomId(`moderation:${guildId}:${interaction.user.id}`).setTitle(`${BRAND} moderation`);
             const field = (id, label, placeholder, style = TextInputStyle.Short) => new TextInputBuilder()
                 .setCustomId(id).setLabel(label).setPlaceholder(placeholder).setStyle(style).setRequired(true);
             modal.addComponents(
                 new ActionRowBuilder().addComponents(field('target', 'Target user', '@User or Discord ID')),
-                new ActionRowBuilder().addComponents(field('type', 'Action', 'Warning, Advisory, Timeout, Kick, or Ban')),
-                new ActionRowBuilder().addComponents(field('reason', 'Reason', 'Why is this action being taken?', TextInputStyle.Paragraph)),
-                new ActionRowBuilder().addComponents(field('expiration', 'Expiration', 'Never, 7 days, or 09/30/2026'))
+                new ActionRowBuilder().addComponents(field('reason', 'Reason', 'Why is this action being taken?', TextInputStyle.Paragraph))
             );
             return interaction.showModal(modal);
         }
 
         if (!interaction.isModalSubmit() || !interaction.customId.startsWith('moderation:')) return;
-        if (!isStaff(interaction.member)) {
+        const [, modalGuildId, modalStaffId] = interaction.customId.split(':');
+        const moderationGuild = await client.guilds.fetch(modalGuildId).catch(() => null);
+        const moderationMember = moderationGuild ? await moderationGuild.members.fetch(interaction.user.id).catch(() => null) : null;
+        if (modalStaffId !== interaction.user.id || !moderationGuild || !moderationMember || !isStaff(moderationMember)) {
             return interaction.reply({ content: 'This moderation form is restricted to staff.', ephemeral: true });
         }
-        if (!hasPermission(interaction.member, PermissionsBitField.Flags.ModerateMembers)) {
+        if (!hasPermission(moderationMember, PermissionsBitField.Flags.ModerateMembers)) {
             return interaction.reply({ content: permissionMessage('Moderate Members'), ephemeral: true });
         }
 
         const targetInput = interaction.fields.getTextInputValue('target').trim();
-        const typeInput = interaction.fields.getTextInputValue('type').trim().toLowerCase();
         const reason = interaction.fields.getTextInputValue('reason').trim();
-        const expiration = parseExpiration(interaction.fields.getTextInputValue('expiration'));
-        const member = await findMember(interaction.guild, targetInput);
-        const validTypes = new Set(['warning', 'advisory', 'timeout', 'mute', 'kick', 'ban']);
-
+        const member = await findMember(moderationGuild, targetInput);
         if (!member) return interaction.reply({ content: 'I could not find that member.', ephemeral: true });
-        if (expiration === undefined) return interaction.reply({ content: 'Use `Never`, a duration like `7 days`, or a valid date.', ephemeral: true });
-        if (!validTypes.has(typeInput)) return interaction.reply({ content: 'Use Warning, Advisory, Timeout, Mute, Kick, or Ban.', ephemeral: true });
         if (member.id === interaction.user.id || member.id === interaction.guild.ownerId) {
             return interaction.reply({ content: 'That member cannot be targeted by this action.', ephemeral: true });
         }
-        if (interaction.member.roles.highest.position <= member.roles.highest.position) {
+        if (moderationMember.roles.highest.position <= member.roles.highest.position) {
             return interaction.reply({ content: 'Your highest role must be above the target member.', ephemeral: true });
         }
 
-        const action = typeInput === 'mute' ? 'timeout' : typeInput;
-        if (action === 'timeout') {
-            if (!expiration || new Date(expiration).getTime() <= Date.now()) return interaction.reply({ content: 'Timeouts require a future expiration.', ephemeral: true });
-            const duration = new Date(expiration).getTime() - Date.now();
-            if (duration > 28 * 86400000) return interaction.reply({ content: 'Discord timeouts cannot exceed 28 days.', ephemeral: true });
-            await member.timeout(duration, reason);
-        } else if (action === 'kick') {
-            await member.kick(reason);
-        } else if (action === 'ban') {
-            await member.ban({ reason });
-        }
+        pendingModeration.set(interaction.user.id, {
+            guildId: modalGuildId,
+            targetId: member.id,
+            targetTag: member.user.tag,
+            reason,
+            action: null,
+            duration: null
+        });
 
-        const store = loadStore();
-        const record = {
-            id: store.nextId++, guildId: interaction.guildId, targetId: member.id,
-            targetTag: member.user.tag, issuerId: interaction.user.id, issuerTag: interaction.user.tag,
-            type: action, reason, issuedAt: new Date().toISOString(),
-            expiration: expiration ? expiration.toISOString() : null, status: statusFor(expiration)
-        };
-        store.punishments.push(record);
-        saveStore(store);
-
-        const embed = brandedEmbed('Action recorded', `Successfully recorded a **${action}** for <@${member.id}>.`, COLORS.green)
-            .addFields(
-                { name: 'Reason', value: reason },
-                { name: 'Expires', value: discordDate(record.expiration) },
-                { name: 'Record', value: `#${String(record.id).padStart(4, '0')}` }
+        const actionMenu = new StringSelectMenuBuilder()
+            .setCustomId(`moderation-action:${interaction.user.id}`)
+            .setPlaceholder('Choose an action')
+            .addOptions(
+                { label: 'Warning', value: 'warning', description: 'Record a warning only' },
+                { label: 'Advisory', value: 'advisory', description: 'Record an advisory only' },
+                { label: 'Mute / Timeout', value: 'timeout', description: 'Temporarily restrict the member' },
+                { label: 'Kick', value: 'kick', description: 'Remove the member from the server' },
+                { label: 'Ban', value: 'ban', description: 'Ban the member from the server' }
             );
-        return interaction.reply({ embeds: [embed] });
+        const durationMenu = new StringSelectMenuBuilder()
+            .setCustomId(`moderation-duration:${interaction.user.id}`)
+            .setPlaceholder('Choose a duration')
+            .addOptions(
+                { label: '30 minutes', value: '30m' },
+                { label: '1 hour', value: '1h' },
+                { label: '6 hours', value: '6h' },
+                { label: '1 day', value: '1d' },
+                { label: '7 days', value: '7d' },
+                { label: '14 days', value: '14d' },
+                { label: '28 days', value: '28d' },
+                { label: 'Permanent / never', value: 'never' }
+            );
+        const confirm = new ButtonBuilder()
+            .setCustomId(`moderation-confirm:${interaction.user.id}`)
+            .setLabel('Apply moderation action')
+            .setStyle(ButtonStyle.Danger);
+        return interaction.reply({
+            embeds: [brandedEmbed('Choose moderation action', `Target: <@${member.id}>\nReason: ${reason}\n\nChoose an action and duration, then confirm.`, COLORS.amber)],
+            components: [
+                new ActionRowBuilder().addComponents(actionMenu),
+                new ActionRowBuilder().addComponents(durationMenu),
+                new ActionRowBuilder().addComponents(confirm)
+            ],
+            ephemeral: true
+        });
     } catch (error) {
         console.error('[interaction]', error);
         const response = { content: 'I could not complete that action. Check my role position and permissions.', ephemeral: true };
