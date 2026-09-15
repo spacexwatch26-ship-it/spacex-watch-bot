@@ -24,6 +24,7 @@ const BRAND = 'SpaceX Watch';
 const COLORS = { blue: 0x2563eb, green: 0x16a34a, amber: 0xd97706 };
 const polls = new Map();
 const pendingModeration = new Map();
+const startedAt = Date.now();
 
 const client = new Client({
     intents: [
@@ -131,14 +132,40 @@ function permissionMessage(permissionName) {
     return `You need **${permissionName}** permission to use this command.`;
 }
 
+function uptimeText() {
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m ${seconds % 60}s`;
+}
+
+function staffDashboardEmbed(guild, store) {
+    const records = store.punishments.filter(record => record.guildId === guild.id);
+    const active = records.filter(record => record.status === 'Active').length;
+    const tickets = guild.channels.cache.filter(channel => channel.topic?.startsWith('ticket-owner:')).size;
+    return brandedEmbed('Staff command center', 'Your private SpaceX Watch operations dashboard.', COLORS.blue)
+        .addFields(
+            { name: 'Server', value: guild.name, inline: true },
+            { name: 'Members', value: String(guild.memberCount), inline: true },
+            { name: 'Open tickets', value: String(tickets), inline: true },
+            { name: 'Active cases', value: String(active), inline: true },
+            { name: 'All cases', value: String(records.length), inline: true },
+            { name: 'Bot uptime', value: uptimeText(), inline: true },
+            { name: 'Fast commands', value: '`-moderate`  `-ticket`  `-stats`  `-case <id>`\n`-announce`  `-poll`  `-claim`  `-close`', inline: false }
+        )
+        .setFooter({ text: `${BRAND} • private staff view` });
+}
+
 client.once('ready', readyClient => {
     console.log(`[ready] ${readyClient.user.tag} is online in ${readyClient.guilds.cache.size} server(s).`);
     readyClient.user.setPresence({
-        activities: [{ name: `${PREFIX}help`, type: 0 }],
+        activities: [{ name: `${PREFIX}dashboard • ${readyClient.guilds.cache.size} server(s)`, type: 0 }],
         status: 'online'
     });
     saveStore(loadStore());
 });
+
+setInterval(() => refreshStatuses(loadStore()), 30000);
 
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild || !message.content.startsWith(PREFIX)) return;
@@ -148,13 +175,13 @@ client.on('messageCreate', async message => {
     const argument = parts.join(' ').trim();
 
     try {
-        const staffCommands = new Set(['announce', 'moderate', 'logs', 'poll', 'claim', 'close', 'clear', 'lock', 'unlock', 'slowmode', 'ticket']);
+        const staffCommands = new Set(['announce', 'moderate', 'logs', 'poll', 'claim', 'close', 'clear', 'lock', 'unlock', 'slowmode', 'ticket', 'dashboard', 'stats', 'case']);
         if (staffCommands.has(command) && !isStaff(message.member)) {
             return message.reply('This command is restricted to staff.');
         }
 
         if (command === 'ping') {
-            return message.reply(`Pong. Gateway latency: **${client.ws.ping}ms**`);
+            return message.reply({ embeds: [brandedEmbed('System check', `Gateway latency: **${client.ws.ping}ms**\nUptime: **${uptimeText()}**\nStatus: **Operational**`, COLORS.green)] });
         }
 
         if (command === 'userinfo') {
@@ -206,12 +233,56 @@ client.on('messageCreate', async message => {
                     { name: `${PREFIX}unlock`, value: 'Unlock this channel for members.' },
                     { name: `${PREFIX}slowmode <seconds>`, value: 'Set channel slowmode from 0 to 21600 seconds.' },
                     { name: `${PREFIX}ticket`, value: 'Post a public panel that anyone can use to open a private staff ticket.' },
+                    { name: `${PREFIX}dashboard`, value: 'Receive a private staff command center in your DMs.' },
+                    { name: `${PREFIX}stats`, value: 'View live moderation and ticket statistics.' },
+                    { name: `${PREFIX}case <id>`, value: 'Inspect one moderation case.' },
                     { name: `${PREFIX}userinfo [@user]`, value: 'Show member details.' },
                     { name: `${PREFIX}serverinfo`, value: 'Show server details.' },
                     { name: `${PREFIX}avatar [@user]`, value: 'Show a member avatar.' },
                     { name: `${PREFIX}ping`, value: 'Check bot and gateway health.' }
                 );
             return message.reply({ embeds: [embed] });
+        }
+
+        if (command === 'dashboard') {
+            try {
+                await message.author.send({ embeds: [staffDashboardEmbed(message.guild, refreshStatuses(loadStore()))] });
+                return message.reply('Your private command center is in your DMs.');
+            } catch {
+                return message.reply('I could not DM your command center. Please enable DMs from server members.');
+            }
+        }
+
+        if (command === 'stats') {
+            const store = refreshStatuses(loadStore());
+            const records = store.punishments.filter(record => record.guildId === message.guildId);
+            const counts = records.reduce((result, record) => {
+                result[record.type] = (result[record.type] || 0) + 1;
+                return result;
+            }, {});
+            const tickets = message.guild.channels.cache.filter(channel => channel.topic?.startsWith('ticket-owner:')).size;
+            return message.reply({ embeds: [brandedEmbed('Live staff statistics', 'A quick read on this server\'s activity.', COLORS.green)
+                .addFields(
+                    { name: 'Cases', value: String(records.length), inline: true },
+                    { name: 'Active', value: String(records.filter(record => record.status === 'Active').length), inline: true },
+                    { name: 'Open tickets', value: String(tickets), inline: true },
+                    { name: 'Action mix', value: Object.entries(counts).map(([type, count]) => `**${type}:** ${count}`).join('\n') || 'No cases recorded yet.' }
+                )] });
+        }
+
+        if (command === 'case') {
+            const caseId = Number(argument.replace(/^#/, ''));
+            const record = refreshStatuses(loadStore()).punishments.find(item => item.guildId === message.guildId && item.id === caseId);
+            if (!record) return message.reply('That case was not found in this server.');
+            return message.reply({ embeds: [brandedEmbed(`Case #${String(record.id).padStart(4, '0')}`, `Detailed moderation record for <@${record.targetId}>.`, COLORS.amber)
+                .addFields(
+                    { name: 'Action', value: record.type, inline: true },
+                    { name: 'Status', value: record.status, inline: true },
+                    { name: 'Issued', value: discordDate(record.issuedAt), inline: true },
+                    { name: 'Issuer', value: `<@${record.issuerId}>`, inline: true },
+                    { name: 'Expires', value: discordDate(record.expiration), inline: true },
+                    { name: 'Reason', value: record.reason }
+                )] });
         }
 
         if (command === 'announce') {
@@ -590,6 +661,8 @@ if (!token) {
 
 process.on('SIGINT', () => client.destroy());
 process.on('SIGTERM', () => client.destroy());
+process.on('unhandledRejection', error => console.error('[unhandled rejection]', error));
+process.on('uncaughtException', error => console.error('[uncaught exception]', error));
 
 client.login(token).catch(error => {
     console.error('[login] Discord login failed:', error.message);

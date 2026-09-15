@@ -1,8 +1,8 @@
 {
   "name": "spacex-watch-bot",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Modern moderation and announcement bot",
+  "description": "SpaceX Watch operations, moderation, tickets, polls, and staff tools",
   "main": "const {.js",
   "scripts": {
     "start": "node \"const {.js\"",

@@ -23,6 +23,9 @@ Staff commands require role `1549523456478023810`:
 - `-unlock`
 - `-slowmode <0-21600>`
 - `-ticket` (posts the public ticket panel)
+- `-dashboard` (sends a private staff command center)
+- `-stats` (live case and ticket statistics)
+- `-case <id>` (inspect a moderation case)
 
 Moderation expiration can be `Never`, a duration such as `7 days`, or a calendar date. Discord limits actual native timeouts to 28 days; longer choices work as record expiration dates for warnings and advisories.
 
