@@ -12,6 +12,9 @@ const {
     GatewayIntentBits,
     ModalBuilder,
     PermissionsBitField,
+    REST,
+    Routes,
+    SlashCommandBuilder,
     StringSelectMenuBuilder,
     TextInputBuilder,
     TextInputStyle
@@ -156,6 +159,31 @@ function staffDashboardEmbed(guild, store) {
         .setFooter({ text: `${BRAND} • private staff view` });
 }
 
+const slashCommands = [
+    new SlashCommandBuilder().setName('help').setDescription('Open the private command guide.'),
+    new SlashCommandBuilder().setName('ping').setDescription('Check the private system status.'),
+    new SlashCommandBuilder().setName('dashboard').setDescription('Open the private staff dashboard.'),
+    new SlashCommandBuilder().setName('stats').setDescription('View private staff statistics.'),
+    new SlashCommandBuilder().setName('userinfo').setDescription('View private member information.')
+        .addUserOption(option => option.setName('user').setDescription('Member to inspect').setRequired(false)),
+    new SlashCommandBuilder().setName('serverinfo').setDescription('View private server information.'),
+    new SlashCommandBuilder().setName('avatar').setDescription('View a private member avatar.')
+        .addUserOption(option => option.setName('user').setDescription('Member avatar to inspect').setRequired(false))
+].map(command => command.toJSON());
+
+async function registerSlashCommands() {
+    if (!process.env.CLIENT_ID) {
+        console.warn('[slash] CLIENT_ID is missing; private slash commands were not registered.');
+        return;
+    }
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN || process.env.BOT_TOKEN);
+    const route = process.env.GUILD_ID
+        ? Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID)
+        : Routes.applicationCommands(process.env.CLIENT_ID);
+    await rest.put(route, { body: slashCommands });
+    console.log(`[slash] Registered ${slashCommands.length} private commands.`);
+}
+
 client.once('ready', readyClient => {
     console.log(`[ready] ${readyClient.user.tag} is online in ${readyClient.guilds.cache.size} server(s).`);
     readyClient.user.setPresence({
@@ -163,6 +191,7 @@ client.once('ready', readyClient => {
         status: 'online'
     });
     saveStore(loadStore());
+    registerSlashCommands().catch(error => console.error('[slash] Registration failed:', error.message));
 });
 
 setInterval(() => refreshStatuses(loadStore()), 30000);
@@ -245,12 +274,7 @@ client.on('messageCreate', async message => {
         }
 
         if (command === 'dashboard') {
-            try {
-                await message.author.send({ embeds: [staffDashboardEmbed(message.guild, refreshStatuses(loadStore()))] });
-                return message.reply('Your private command center is in your DMs.');
-            } catch {
-                return message.reply('I could not DM your command center. Please enable DMs from server members.');
-            }
+            return message.reply({ embeds: [staffDashboardEmbed(message.guild, refreshStatuses(loadStore()))] });
         }
 
         if (command === 'stats') {
@@ -339,8 +363,13 @@ client.on('messageCreate', async message => {
                 .setCustomId('ticket:create')
                 .setLabel('Open a ticket')
                 .setStyle(ButtonStyle.Primary);
-            const embed = brandedEmbed('Need help?', 'Click the button below to open a private ticket with the staff team.', COLORS.blue)
-                .addFields({ name: 'What happens next?', value: 'A private channel is created for you and the staff team. Please explain what you need help with.' });
+            const embed = brandedEmbed('SPACE X WATCH • SUPPORT DESK', 'Need a hand? Open a private support room with the staff team.', COLORS.blue)
+                .addFields(
+                    { name: '01 • Open', value: 'Click the button below. You will get one private channel.' },
+                    { name: '02 • Explain', value: 'Tell staff what happened and include useful details.' },
+                    { name: '03 • Resolve', value: 'When you are finished, use the close button in your ticket.' }
+                )
+                .setFooter({ text: 'Support desk • private channels • staff monitored' });
             return message.channel.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] });
         }
 
@@ -421,6 +450,73 @@ client.on('messageCreate', async message => {
 
 client.on('interactionCreate', async interaction => {
     try {
+        if (interaction.isChatInputCommand()) {
+            const command = interaction.commandName;
+            const staffOnly = new Set(['dashboard', 'stats']);
+            if (staffOnly.has(command) && !isStaff(interaction.member)) {
+                return interaction.reply({ content: 'This private command is restricted to staff.', ephemeral: true });
+            }
+
+            if (command === 'ping') {
+                return interaction.reply({ embeds: [brandedEmbed('System check', `Gateway latency: **${client.ws.ping}ms**\nUptime: **${uptimeText()}**\nStatus: **Operational**`, COLORS.green)], ephemeral: true });
+            }
+
+            if (command === 'help') {
+                const embed = brandedEmbed('Private command guide', 'Only you can see this response.')
+                    .addFields(
+                        { name: 'Private slash commands', value: '`/help` `/ping` `/userinfo` `/serverinfo` `/avatar`' },
+                        { name: 'Staff dashboard', value: '`/dashboard` `/stats`' },
+                        { name: 'Server commands', value: '`-announce` `-moderate` `-ticket` `-claim` `-close` `-poll`' }
+                    );
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            if (command === 'dashboard') {
+                return interaction.reply({ embeds: [staffDashboardEmbed(interaction.guild, refreshStatuses(loadStore()))], ephemeral: true });
+            }
+
+            if (command === 'stats') {
+                const store = refreshStatuses(loadStore());
+                const records = store.punishments.filter(record => record.guildId === interaction.guildId);
+                const tickets = interaction.guild.channels.cache.filter(channel => channel.topic?.startsWith('ticket-owner:')).size;
+                return interaction.reply({ embeds: [brandedEmbed('Private staff statistics', 'Only you can see this report.', COLORS.green)
+                    .addFields(
+                        { name: 'Cases', value: String(records.length), inline: true },
+                        { name: 'Active', value: String(records.filter(record => record.status === 'Active').length), inline: true },
+                        { name: 'Open tickets', value: String(tickets), inline: true }
+                    )], ephemeral: true });
+            }
+
+            if (command === 'serverinfo') {
+                const embed = brandedEmbed(`Server information • ${interaction.guild.name}`, 'Only you can see this response.')
+                    .addFields(
+                        { name: 'Owner', value: `<@${interaction.guild.ownerId}>`, inline: true },
+                        { name: 'Members', value: String(interaction.guild.memberCount), inline: true },
+                        { name: 'Channels', value: String(interaction.guild.channels.cache.size), inline: true },
+                        { name: 'Created', value: discordDate(interaction.guild.createdAt), inline: true }
+                    );
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+
+            if (command === 'userinfo' || command === 'avatar') {
+                const user = interaction.options.getUser('user') || interaction.user;
+                const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+                if (!member) return interaction.reply({ content: 'That user is not a member of this server.', ephemeral: true });
+                if (command === 'avatar') {
+                    const avatar = user.displayAvatarURL({ size: 1024, extension: 'png' });
+                    return interaction.reply({ embeds: [brandedEmbed(`${user.tag}'s avatar`, `[Open full size](${avatar})`).setImage(avatar)], ephemeral: true });
+                }
+                return interaction.reply({ embeds: [brandedEmbed(`User information • ${user.tag}`, 'Only you can see this response.')
+                    .setThumbnail(user.displayAvatarURL({ size: 256 }))
+                    .addFields(
+                        { name: 'User ID', value: user.id, inline: true },
+                        { name: 'Joined server', value: discordDate(member.joinedAt), inline: true },
+                        { name: 'Account created', value: discordDate(user.createdAt), inline: true },
+                        { name: 'Highest role', value: member.roles.highest.toString(), inline: true }
+                    )], ephemeral: true });
+            }
+        }
+
         if (interaction.isButton() && interaction.customId === 'ticket:create') {
             const existingTicket = interaction.guild.channels.cache.find(channel =>
                 channel.type === ChannelType.GuildText && channel.topic === `ticket-owner:${interaction.user.id}`
@@ -442,10 +538,12 @@ client.on('interactionCreate', async interaction => {
                     { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels] }
                 ]
             });
-            const closeButton = new ButtonBuilder().setCustomId('ticket:close').setLabel('Close ticket').setStyle(ButtonStyle.Danger);
+            const closeButton = new ButtonBuilder().setCustomId('ticket:close').setLabel('Close ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
             await channel.send({
                 content: `<@${interaction.user.id}> <@&${STAFF_ROLE_ID}>`,
-                embeds: [brandedEmbed('Ticket opened', 'Please describe your question or issue. A staff member will be with you shortly.', COLORS.green)],
+                embeds: [brandedEmbed('PRIVATE SUPPORT ROOM', `Welcome <@${interaction.user.id}>.\n\nPlease describe your request clearly and a staff member will respond here.`, COLORS.green)
+                    .addFields({ name: 'Ticket owner', value: `<@${interaction.user.id}>`, inline: true }, { name: 'Status', value: 'Open', inline: true })
+                    .setFooter({ text: `${BRAND} • support desk` })],
                 components: [new ActionRowBuilder().addComponents(closeButton)]
             });
             return interaction.reply({ content: `Your private ticket is ready: ${channel}`, ephemeral: true });

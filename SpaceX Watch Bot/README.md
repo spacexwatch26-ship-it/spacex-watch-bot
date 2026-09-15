@@ -10,6 +10,16 @@ Public commands:
 - `-serverinfo`
 - `-avatar [@user]`
 
+Private slash commands:
+
+- `/help`
+- `/ping`
+- `/userinfo [user]`
+- `/serverinfo`
+- `/avatar [user]`
+- `/dashboard` (staff)
+- `/stats` (staff)
+
 Staff commands require role `1549523456478023810`:
 
 - `-announce <message>`
@@ -23,7 +33,7 @@ Staff commands require role `1549523456478023810`:
 - `-unlock`
 - `-slowmode <0-21600>`
 - `-ticket` (posts the public ticket panel)
-- `-dashboard` (sends a private staff command center)
+- `-dashboard` (shows the staff command center in the current channel)
 - `-stats` (live case and ticket statistics)
 - `-case <id>` (inspect a moderation case)
 
@@ -63,6 +73,8 @@ Railway can upload this local folder directly with its CLI.
    railway variable set DISCORD_TOKEN=your_new_discord_token
    railway variable set COMMAND_PREFIX=-
    railway variable set NODE_ENV=production
+   railway variable set CLIENT_ID=your_discord_application_id
+   railway variable set GUILD_ID=your_server_id
    ```
 
 6. Upload the current folder and deploy it:
