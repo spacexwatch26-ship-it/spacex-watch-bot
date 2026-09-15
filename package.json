@@ -1,0 +1,15 @@
+{
+  "name": "spacex-watch-v2",
+  "version": "2.0.0",
+  "private": true,
+  "description": "SpaceX Watch V2 Discord operations bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "check": "node --check bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.4.7"
+  }
+}
