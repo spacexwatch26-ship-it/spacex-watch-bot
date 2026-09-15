@@ -1,0 +1,86 @@
+# SpaceX Watch Bot
+
+## Commands
+
+Public commands:
+
+- `-help`
+- `-ping`
+- `-userinfo [@user]`
+- `-serverinfo`
+- `-avatar [@user]`
+
+Staff commands require role `1549523456478023810`:
+
+- `-announce <message>`
+- `-moderate`
+- `-logs [@user|id]`
+- `-poll Question | Option 1 | Option 2`
+- `-claim`
+- `-close`
+- `-clear <1-100>`
+- `-lock`
+- `-unlock`
+- `-slowmode <0-21600>`
+
+## Railway 24-hour hosting without GitHub
+
+Railway can upload this local folder directly with its CLI.
+
+1. Open PowerShell and move into this folder:
+
+   ```powershell
+   cd "C:\Users\paxtu\Downloads"
+   ```
+
+2. Install the Railway CLI:
+
+   ```powershell
+   npm.cmd install --global @railway/cli
+   ```
+
+3. Sign in. A browser window will open:
+
+   ```powershell
+   railway login
+   ```
+
+4. Create and link a new Railway project:
+
+   ```powershell
+   railway init
+   ```
+
+5. Add the bot variables. Paste the new Discord token when prompted for `DISCORD_TOKEN`:
+
+   ```powershell
+   railway variable set DISCORD_TOKEN=your_new_discord_token
+   railway variable set COMMAND_PREFIX=-
+   railway variable set NODE_ENV=production
+   ```
+
+6. Upload the current folder and deploy it:
+
+   ```powershell
+   railway up
+   ```
+
+7. Watch the logs:
+
+   ```powershell
+   railway logs
+   ```
+
+You should see `SpaceX Watch ... is online`. Railway will keep the service running and restart it after a crash. You do not need to expose a port for this Discord bot.
+
+Railway services run continuously while the project has available usage. This bot does not need a web server or public port.
+
+### Persistence note
+
+`punishments.json` is local file storage. Railway's normal filesystem can be replaced during redeploys, so use a Railway Volume mounted at the project directory or move punishment records to Postgres if the records must survive every redeploy.
+
+### Discord configuration
+
+The bot needs the `Guilds`, `Guild Members`, `Guild Messages`, and `Message Content` intents enabled in the Discord Developer Portal. Its role must also be above members it needs to timeout, kick, or ban.
+
+The staff role ID is configured in the source as `1549523456478023810`.

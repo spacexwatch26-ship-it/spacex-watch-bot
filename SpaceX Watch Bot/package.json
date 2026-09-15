@@ -1,0 +1,15 @@
+{
+  "name": "spacex-watch-bot",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Modern moderation and announcement bot",
+  "main": "const {.js",
+  "scripts": {
+    "start": "node \"const {.js\"",
+    "check": "node --check \"const {.js\""
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.4.7"
+  }
+}
