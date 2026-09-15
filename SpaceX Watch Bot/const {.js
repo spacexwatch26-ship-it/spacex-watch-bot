@@ -7,6 +7,7 @@ const {
     ButtonBuilder,
     ButtonStyle,
     Client,
+    ChannelType,
     EmbedBuilder,
     GatewayIntentBits,
     ModalBuilder,
@@ -145,7 +146,7 @@ client.on('messageCreate', async message => {
     const argument = parts.join(' ').trim();
 
     try {
-        const staffCommands = new Set(['announce', 'moderate', 'logs', 'poll', 'claim', 'close', 'clear', 'lock', 'unlock', 'slowmode']);
+        const staffCommands = new Set(['announce', 'moderate', 'logs', 'poll', 'claim', 'close', 'clear', 'lock', 'unlock', 'slowmode', 'ticket']);
         if (staffCommands.has(command) && !isStaff(message.member)) {
             return message.reply('This command is restricted to staff.');
         }
@@ -202,6 +203,7 @@ client.on('messageCreate', async message => {
                     { name: `${PREFIX}lock` , value: 'Lock this channel for members.' },
                     { name: `${PREFIX}unlock`, value: 'Unlock this channel for members.' },
                     { name: `${PREFIX}slowmode <seconds>`, value: 'Set channel slowmode from 0 to 21600 seconds.' },
+                    { name: `${PREFIX}ticket`, value: 'Post a public panel that anyone can use to open a private staff ticket.' },
                     { name: `${PREFIX}userinfo [@user]`, value: 'Show member details.' },
                     { name: `${PREFIX}serverinfo`, value: 'Show server details.' },
                     { name: `${PREFIX}avatar [@user]`, value: 'Show a member avatar.' },
@@ -257,6 +259,16 @@ client.on('messageCreate', async message => {
             }
             await message.channel.setRateLimitPerUser(seconds);
             return message.reply(`Slowmode set to **${seconds} seconds**.`);
+        }
+
+        if (command === 'ticket') {
+            const button = new ButtonBuilder()
+                .setCustomId('ticket:create')
+                .setLabel('Open a ticket')
+                .setStyle(ButtonStyle.Primary);
+            const embed = brandedEmbed('Need help?', 'Click the button below to open a private ticket with the staff team.', COLORS.blue)
+                .addFields({ name: 'What happens next?', value: 'A private channel is created for you and the staff team. Please explain what you need help with.' });
+            return message.channel.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] });
         }
 
         if (command === 'moderate') {
@@ -331,6 +343,44 @@ client.on('messageCreate', async message => {
 
 client.on('interactionCreate', async interaction => {
     try {
+        if (interaction.isButton() && interaction.customId === 'ticket:create') {
+            const existingTicket = interaction.guild.channels.cache.find(channel =>
+                channel.type === ChannelType.GuildText && channel.topic === `ticket-owner:${interaction.user.id}`
+            );
+            if (existingTicket) {
+                return interaction.reply({ content: `You already have an open ticket: ${existingTicket}`, ephemeral: true });
+            }
+
+            const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 60) || interaction.user.id;
+            const channel = await interaction.guild.channels.create({
+                name: `ticket-${safeName}`,
+                type: ChannelType.GuildText,
+                parent: interaction.channel.parentId,
+                topic: `ticket-owner:${interaction.user.id}`,
+                permissionOverwrites: [
+                    { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels] },
+                    { id: client.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageChannels] }
+                ]
+            });
+            const closeButton = new ButtonBuilder().setCustomId('ticket:close').setLabel('Close ticket').setStyle(ButtonStyle.Danger);
+            await channel.send({
+                content: `<@${interaction.user.id}> <@&${STAFF_ROLE_ID}>`,
+                embeds: [brandedEmbed('Ticket opened', 'Please describe your question or issue. A staff member will be with you shortly.', COLORS.green)],
+                components: [new ActionRowBuilder().addComponents(closeButton)]
+            });
+            return interaction.reply({ content: `Your private ticket is ready: ${channel}`, ephemeral: true });
+        }
+
+        if (interaction.isButton() && interaction.customId === 'ticket:close') {
+            if (!isStaff(interaction.member) && interaction.channel.topic !== `ticket-owner:${interaction.user.id}`) {
+                return interaction.reply({ content: 'Only staff or the ticket owner can close this ticket.', ephemeral: true });
+            }
+            await interaction.reply('This ticket will close in 5 seconds.');
+            return setTimeout(() => interaction.channel.delete().catch(() => undefined), 5000);
+        }
+
         if (interaction.isButton() && interaction.customId.startsWith('poll:')) {
             const [, pollId, optionIndex] = interaction.customId.split(':');
             const poll = polls.get(pollId);

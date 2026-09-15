@@ -22,6 +22,9 @@ Staff commands require role `1549523456478023810`:
 - `-lock`
 - `-unlock`
 - `-slowmode <0-21600>`
+- `-ticket` (posts the public ticket panel)
+
+Moderation expiration can be `Never`, a duration such as `7 days`, or a calendar date. Discord limits actual native timeouts to 28 days; longer choices work as record expiration dates for warnings and advisories.
 
 ## Railway 24-hour hosting without GitHub
 
@@ -30,7 +33,7 @@ Railway can upload this local folder directly with its CLI.
 1. Open PowerShell and move into this folder:
 
    ```powershell
-   cd "C:\Users\paxtu\Downloads"
+   cd "$HOME\Desktop\SpaceX Watch Bot"
    ```
 
 2. Install the Railway CLI:
@@ -84,3 +87,14 @@ Railway services run continuously while the project has available usage. This bo
 The bot needs the `Guilds`, `Guild Members`, `Guild Messages`, and `Message Content` intents enabled in the Discord Developer Portal. Its role must also be above members it needs to timeout, kick, or ban.
 
 The staff role ID is configured in the source as `1549523456478023810`.
+
+## Updating the bot
+
+After changing the files, deploy the updated Desktop folder again:
+
+```powershell
+cd "$HOME\Desktop\SpaceX Watch Bot"
+railway up
+```
+
+Railway will build the new version and restart the service. Check it with `railway logs`.
