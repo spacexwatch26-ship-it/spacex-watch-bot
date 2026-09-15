@@ -22,7 +22,8 @@ const {
 
 const APP_NAME = 'SpaceX Watch V2';
 const PREFIX = process.env.COMMAND_PREFIX || '-';
-const STAFF_ROLE_ID = '1549523456478023810';
+const STAFF_ROLE_ID = '1548881045066092584';
+const ANNOUNCE_USER_ID = '1548891821348888596';
 const DATA_FILE = path.join(__dirname, 'spacex-watch-data.json');
 const COLORS = { blue: 0x2563eb, cyan: 0x0891b2, green: 0x16a34a, amber: 0xd97706, red: 0xdc2626, dark: 0x111827 };
 const startedAt = Date.now();
@@ -207,6 +208,7 @@ client.on('messageCreate', async message => {
         }
 
         if (command === 'announce') {
+            if (message.author.id !== ANNOUNCE_USER_ID) return message.reply('Only the authorized announcement account can use this command.');
             if (!hasPermission(message.member, PermissionsBitField.Flags.ManageMessages)) return message.reply('You need **Manage Messages** permission.');
             if (!args) return message.reply('Add announcement text after the command.');
             await message.channel.send({ embeds: [card('Official announcement', args, COLORS.blue).setFooter({ text: `${APP_NAME} • issued by ${message.author.tag}` })] });

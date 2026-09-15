@@ -14,7 +14,9 @@ Public prefix commands:
 - `-serverinfo`
 - `-avatar [@user]`
 
-Staff-only prefix commands require role `1549523456478023810`:
+Staff-only prefix commands require role `1548881045066092584`.
+
+The `-announce` command is restricted to user `1548891821348888596` and also requires Manage Messages permission:
 
 - `-announce <message>`
 - `/moderate` - private in-server moderation desk
