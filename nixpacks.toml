@@ -1,8 +1,0 @@
-[phases.setup]
-aptPkgs = ["ffmpeg", "yt-dlp"]
-
-[phases.install]
-cmds = ["npm install --ignore-scripts"]
-
-[start]
-cmd = "npm start"
